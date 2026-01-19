@@ -915,7 +915,19 @@ with tab_dashboard:
         st.caption(f"Showing first 50 rows of {len(df):,} total records from `{cleaned_data_name if cleaned_data_name else 'uploaded file'}`")
 
         total_rows = len(df)
-        total_patients = df["patient_nbr"].nunique() if "patient_nbr" in df.columns else 0
+        # Calculate unique patients - check for patient identifier column
+        if "patient_nbr" in df.columns:
+            total_patients = df["patient_nbr"].nunique()
+        elif "patient_id" in df.columns:
+            total_patients = df["patient_id"].nunique()
+        elif "encounter_id" in df.columns:
+            # If we only have encounter_id, each row is an encounter
+            # But if this is patient-level aggregated data, each row = 1 patient
+            total_patients = total_rows  # Assuming patient-level aggregation
+        else:
+            # If no patient identifier found, assume each row represents a unique patient
+            # (This is typical for patient-level aggregated datasets)
+            total_patients = total_rows
         # Readmission rate: Check if readmitted column is binary (0/1) or text ("<30", ">30", "NO")
         if "readmitted" in df.columns:
             if df["readmitted"].dtype in ['int64', 'float64', 'int32', 'float32']:
