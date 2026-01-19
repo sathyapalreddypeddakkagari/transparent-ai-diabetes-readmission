@@ -279,6 +279,10 @@ patients = [
 
 def preprocess_single_patient(patient_dict):
     """Preprocess a single patient record for prediction."""
+    # Safety check - ensure model artifacts are loaded
+    if FINAL_FEATURES is None or scaler is None:
+        raise RuntimeError("Model artifacts not loaded. Cannot preprocess patient data.")
+    
     df_new = pd.DataFrame([patient_dict])
 
     # Log transforms
@@ -348,7 +352,7 @@ def preprocess_single_patient(patient_dict):
 
 def get_shap_explanation(X_scaled, patient_features_df):
     """Generate SHAP explanation for the prediction."""
-    if not SHAP_AVAILABLE:
+    if not SHAP_AVAILABLE or model is None:
         return None, None
     
     try:
@@ -419,9 +423,6 @@ st.set_page_config(
 # Show SHAP import warning if needed (after st.set_page_config)
 if not SHAP_AVAILABLE:
     st.warning("⚠️ SHAP not installed. Run: `pip install shap` for explainability features. App will work without SHAP explanations.")
-
-# Debug: Show app started message (can be removed later)
-# st.success("✅ App initialized successfully!")
 
 # Inject custom CSS theme
 st.markdown("""
