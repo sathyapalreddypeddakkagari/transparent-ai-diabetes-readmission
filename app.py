@@ -23,9 +23,9 @@ SCALER_PATH = BASE_DIR / "scaler.pkl"
 FEATURES_PATH = BASE_DIR / "final_features.json"
 
 # Load model artifacts with error handling and caching
-@st.cache_resource
-def load_model_artifacts():
-    """Load model artifacts with caching."""
+# Function will be decorated after Streamlit initialization
+def _load_model_artifacts():
+    """Load model artifacts (decorator applied after st.set_page_config)."""
     try:
         if not MODEL_PATH.exists():
             raise FileNotFoundError(f"Model file not found: {MODEL_PATH}")
@@ -40,9 +40,7 @@ def load_model_artifacts():
             final_features = json.load(f)
         return model, scaler, final_features
     except Exception as e:
-        error_msg = f"❌ Error loading model artifacts: {str(e)}\n"
-        error_msg += f"Current directory: {BASE_DIR}\n"
-        error_msg += f"Looking for files in: {BASE_DIR}"
+        error_msg = f"Error loading model artifacts: {str(e)}"
         raise RuntimeError(error_msg) from e
 
 # Initialize model variables (will be loaded when needed)
@@ -392,6 +390,23 @@ def safe_value_counts(df, col, top_n=10):
         return df[col].value_counts().head(top_n)
     return pd.Series(dtype="int64")
 
+# Cache functions for data loading (functions defined, decorators applied after st.set_page_config)
+def _load_raw_data():
+    """Load raw diabetes dataset."""
+    raw_data_path = BASE_DIR / "diabetic_data.csv"
+    if raw_data_path.exists():
+        return load_diabetes_dataset(raw_data_path)
+    return None
+
+def _load_cleaned_data():
+    """Load cleaned diabetes dataset."""
+    cleaned_data_path = BASE_DIR / "final1_data.csv"
+    if not cleaned_data_path.exists():
+        cleaned_data_path = BASE_DIR / "final_data.csv"
+    if cleaned_data_path.exists():
+        return load_diabetes_dataset(cleaned_data_path), cleaned_data_path.name
+    return None, None
+
 
 # ---------- Streamlit UI ----------
 # CRITICAL: st.set_page_config() MUST be called first, before any other Streamlit commands
@@ -404,6 +419,9 @@ st.set_page_config(
 # Show SHAP import warning if needed (after st.set_page_config)
 if not SHAP_AVAILABLE:
     st.warning("⚠️ SHAP not installed. Run: `pip install shap` for explainability features. App will work without SHAP explanations.")
+
+# Debug: Show app started message (can be removed later)
+# st.success("✅ App initialized successfully!")
 
 # Inject custom CSS theme
 st.markdown("""
@@ -589,13 +607,41 @@ h1, h2, h3 {
 """, unsafe_allow_html=True)
 
 # Load model artifacts after Streamlit is initialized
+# Apply cache decorators now that Streamlit is initialized (AFTER st.set_page_config)
 try:
-    model, scaler, FINAL_FEATURES = load_model_artifacts()
-except Exception as e:
-    st.error(f"❌ Error loading model artifacts: {str(e)}")
-    st.error(f"Current directory: {BASE_DIR}")
-    st.error(f"Please ensure all model files are in the repository.")
-    st.stop()
+    load_model_artifacts = st.cache_resource(_load_model_artifacts)
+except Exception as decorator_error:
+    st.error(f"❌ Error setting up model caching: {str(decorator_error)}")
+    load_model_artifacts = None
+
+try:
+    load_raw_data_cached = st.cache_data(_load_raw_data)
+    load_cleaned_data_cached = st.cache_data(_load_cleaned_data)
+except Exception as decorator_error:
+    st.warning(f"⚠️ Warning: Error setting up data caching: {str(decorator_error)}")
+    load_raw_data_cached = _load_raw_data  # Fallback without caching
+    load_cleaned_data_cached = _load_cleaned_data  # Fallback without caching
+
+# Try to load models, but don't crash if they're missing
+if load_model_artifacts is not None:
+    try:
+        model, scaler, FINAL_FEATURES = load_model_artifacts()
+    except Exception as e:
+        st.error(f"❌ Error loading model artifacts: {str(e)}")
+        st.error(f"Current directory: {BASE_DIR}")
+        st.error(f"Files checked:")
+        st.error(f"  - Model: {MODEL_PATH} (exists: {MODEL_PATH.exists()})")
+        st.error(f"  - Scaler: {SCALER_PATH} (exists: {SCALER_PATH.exists()})")
+        st.error(f"  - Features: {FEATURES_PATH} (exists: {FEATURES_PATH.exists()})")
+        st.error(f"Please ensure all model files are in the repository.")
+        # Don't stop - allow app to show error message
+        model = None
+        scaler = None
+        FINAL_FEATURES = None
+else:
+    model = None
+    scaler = None
+    FINAL_FEATURES = None
 
 # Navigation Bar
 st.markdown("""
@@ -703,6 +749,12 @@ with tab_infer:
             pass  # Will process below
     
     if patient is not None:
+        # Check if model is loaded
+        if model is None or scaler is None or FINAL_FEATURES is None:
+            st.error("❌ **Model not loaded!** Please check that all model files are in the repository.")
+            st.error("Required files: `xgb_model.pkl`, `scaler.pkl`, `final_features.json`")
+            st.stop()
+        
         # Show ICD-9 Groupings
         st.markdown("---")
         st.markdown("### 📋 ICD-9 Diagnosis Groupings")
@@ -808,7 +860,10 @@ with tab_infer:
     with st.expander("📦 Model Artifacts & Configuration"):
         st.write(f"- **Model:** `{MODEL_PATH.name}` (XGBoost Classifier)")
         st.write(f"- **Scaler:** `{SCALER_PATH.name}` (StandardScaler)")
-        st.write(f"- **Feature Schema:** `{FEATURES_PATH.name}` ({len(FINAL_FEATURES)} features)")
+        if FINAL_FEATURES is not None:
+            st.write(f"- **Feature Schema:** `{FEATURES_PATH.name}` ({len(FINAL_FEATURES)} features)")
+        else:
+            st.write(f"- **Feature Schema:** `{FEATURES_PATH.name}` (Not loaded)")
         st.write(f"- **Primary Features for Evaluation:** {len(PRIMARY_FEATURES)} key features")
 
 
@@ -830,23 +885,15 @@ with tab_dashboard:
     st.markdown("---")
 
     # Load raw data (diabetic_data.csv) for Dataset Snapshot
-    raw_data_path = BASE_DIR / "diabetic_data.csv"
-    df_raw = None
-    if raw_data_path.exists():
-        df_raw = load_diabetes_dataset(raw_data_path)
+    # Use cached loading functions (defined at module level)
+    df_raw = load_raw_data_cached()
+    df, cleaned_data_name = load_cleaned_data_cached()
     
-    # Load cleaned data (final1_data.csv or final_data.csv) for cleaned table
-    cleaned_data_path = BASE_DIR / "final1_data.csv"
-    if not cleaned_data_path.exists():
-        cleaned_data_path = BASE_DIR / "final_data.csv"
-    
-    df = None
-    if cleaned_data_path.exists():
-        df = load_diabetes_dataset(cleaned_data_path)
-    else:
+    if df is None:
         data_file = st.file_uploader("Upload cleaned data CSV (final1_data.csv or final_data.csv)", type=["csv"])
         if data_file is not None:
             df = load_diabetes_dataset(data_file)
+            cleaned_data_name = data_file.name
     
     # Display Raw Dataset Snapshot (diabetic_data.csv)
     if df_raw is not None:
@@ -858,10 +905,10 @@ with tab_dashboard:
     # Display Cleaned Data Table
     if df is not None:
         st.markdown("---")
-        st.write(f"### ✨ Cleaned & Processed Dataset ({cleaned_data_path.name})")
+        st.write(f"### ✨ Cleaned & Processed Dataset ({cleaned_data_name if cleaned_data_name else 'uploaded file'})")
         st.success(f"**Cleaned Dataset:** {len(df):,} patient-level records with {len(df.columns)} engineered features")
         st.dataframe(df.head(50), use_container_width=True)
-        st.caption(f"Showing first 50 rows of {len(df):,} total records from `{cleaned_data_path.name}`")
+        st.caption(f"Showing first 50 rows of {len(df):,} total records from `{cleaned_data_name if cleaned_data_name else 'uploaded file'}`")
 
         total_rows = len(df)
         total_patients = df["patient_nbr"].nunique() if "patient_nbr" in df.columns else 0
