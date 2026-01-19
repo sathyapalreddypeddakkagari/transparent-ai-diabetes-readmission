@@ -6,6 +6,8 @@ import joblib
 import numpy as np
 import pandas as pd
 import streamlit as st
+import matplotlib
+matplotlib.use('Agg')  # Use non-interactive backend for headless environments
 import matplotlib.pyplot as plt
 
 # Try to import SHAP, but handle gracefully if not available
@@ -627,22 +629,30 @@ except Exception as decorator_error:
     load_cleaned_data_cached = _load_cleaned_data  # Fallback without caching
 
 # Try to load models, but don't crash if they're missing
-if load_model_artifacts is not None:
-    try:
-        model, scaler, FINAL_FEATURES = load_model_artifacts()
-    except Exception as e:
-        st.error(f"❌ Error loading model artifacts: {str(e)}")
-        st.error(f"Current directory: {BASE_DIR}")
-        st.error(f"Files checked:")
-        st.error(f"  - Model: {MODEL_PATH} (exists: {MODEL_PATH.exists()})")
-        st.error(f"  - Scaler: {SCALER_PATH} (exists: {SCALER_PATH.exists()})")
-        st.error(f"  - Features: {FEATURES_PATH} (exists: {FEATURES_PATH.exists()})")
-        st.error(f"Please ensure all model files are in the repository.")
-        # Don't stop - allow app to show error message
+try:
+    if load_model_artifacts is not None:
+        try:
+            model, scaler, FINAL_FEATURES = load_model_artifacts()
+        except Exception as e:
+            st.error(f"❌ Error loading model artifacts: {str(e)}")
+            st.error(f"Current directory: {BASE_DIR}")
+            st.error(f"Files checked:")
+            st.error(f"  - Model: {MODEL_PATH} (exists: {MODEL_PATH.exists()})")
+            st.error(f"  - Scaler: {SCALER_PATH} (exists: {SCALER_PATH.exists()})")
+            st.error(f"  - Features: {FEATURES_PATH} (exists: {FEATURES_PATH.exists()})")
+            st.error(f"Please ensure all model files are in the repository.")
+            # Don't stop - allow app to show error message
+            model = None
+            scaler = None
+            FINAL_FEATURES = None
+    else:
         model = None
         scaler = None
         FINAL_FEATURES = None
-else:
+except Exception as init_error:
+    st.error(f"❌ Critical error during initialization: {str(init_error)}")
+    import traceback
+    st.code(traceback.format_exc())
     model = None
     scaler = None
     FINAL_FEATURES = None
