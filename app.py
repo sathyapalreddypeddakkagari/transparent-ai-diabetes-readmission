@@ -424,6 +424,9 @@ st.set_page_config(
 if not SHAP_AVAILABLE:
     st.warning("⚠️ SHAP not installed. Run: `pip install shap` for explainability features. App will work without SHAP explanations.")
 
+# App initialization success message (can be hidden after verification)
+st.success("✅ App initialized successfully")
+
 # Inject custom CSS theme
 st.markdown("""
 <style>
