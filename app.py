@@ -22,10 +22,30 @@ MODEL_PATH = BASE_DIR / "xgb_model.pkl"
 SCALER_PATH = BASE_DIR / "scaler.pkl"
 FEATURES_PATH = BASE_DIR / "final_features.json"
 
-model = joblib.load(MODEL_PATH)
-scaler = joblib.load(SCALER_PATH)
-with open(FEATURES_PATH, "r") as f:
-    FINAL_FEATURES = json.load(f)
+# Load model artifacts with error handling
+@st.cache_resource
+def load_model_artifacts():
+    """Load model artifacts with caching."""
+    try:
+        if not MODEL_PATH.exists():
+            raise FileNotFoundError(f"Model file not found: {MODEL_PATH}")
+        if not SCALER_PATH.exists():
+            raise FileNotFoundError(f"Scaler file not found: {SCALER_PATH}")
+        if not FEATURES_PATH.exists():
+            raise FileNotFoundError(f"Features file not found: {FEATURES_PATH}")
+        
+        model = joblib.load(MODEL_PATH)
+        scaler = joblib.load(SCALER_PATH)
+        with open(FEATURES_PATH, "r") as f:
+            final_features = json.load(f)
+        return model, scaler, final_features
+    except Exception as e:
+        st.error(f"❌ Error loading model artifacts: {str(e)}")
+        st.error(f"Current directory: {BASE_DIR}")
+        st.error(f"Looking for files in: {BASE_DIR}")
+        st.stop()
+
+model, scaler, FINAL_FEATURES = load_model_artifacts()
 
 # Primary features for evaluation (from correlation analysis and feature importance)
 PRIMARY_FEATURES = [
