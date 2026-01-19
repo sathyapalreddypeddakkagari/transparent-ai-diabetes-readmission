@@ -392,7 +392,12 @@ def get_shap_explanation(X_scaled, patient_features_df):
         
         # Summary plot data
         shap_series = pd.Series(shap_values, index=feature_names)
-        shap_series = shap_series.sort_values(key=abs, ascending=False)
+        # Sort by absolute value (handle pandas version compatibility)
+        try:
+            shap_series = shap_series.sort_values(key=abs, ascending=False)
+        except TypeError:
+            # Fallback for older pandas versions
+            shap_series = shap_series.reindex(shap_series.abs().sort_values(ascending=False).index)
         
         return shap_series, shap_values
     except Exception as e:
@@ -401,7 +406,12 @@ def get_shap_explanation(X_scaled, patient_features_df):
 
 
 def load_diabetes_dataset(file) -> pd.DataFrame:
-    return pd.read_csv(file, low_memory=False)
+    """Load diabetes dataset from CSV file with error handling."""
+    try:
+        return pd.read_csv(file, low_memory=False)
+    except Exception as e:
+        log_error(f"Error loading dataset from {file}: {e}", e)
+        raise
 
 
 def safe_value_counts(df, col, top_n=10):
@@ -412,19 +422,27 @@ def safe_value_counts(df, col, top_n=10):
 # Cache functions for data loading (functions defined, decorators applied after st.set_page_config)
 def _load_raw_data():
     """Load raw diabetes dataset."""
-    raw_data_path = BASE_DIR / "diabetic_data.csv"
-    if raw_data_path.exists():
-        return load_diabetes_dataset(raw_data_path)
-    return None
+    try:
+        raw_data_path = BASE_DIR / "diabetic_data.csv"
+        if raw_data_path.exists():
+            return load_diabetes_dataset(raw_data_path)
+        return None
+    except Exception as e:
+        log_error(f"Error in _load_raw_data: {e}", e)
+        return None
 
 def _load_cleaned_data():
     """Load cleaned diabetes dataset."""
-    cleaned_data_path = BASE_DIR / "final1_data.csv"
-    if not cleaned_data_path.exists():
-        cleaned_data_path = BASE_DIR / "final_data.csv"
-    if cleaned_data_path.exists():
-        return load_diabetes_dataset(cleaned_data_path), cleaned_data_path.name
-    return None, None
+    try:
+        cleaned_data_path = BASE_DIR / "final1_data.csv"
+        if not cleaned_data_path.exists():
+            cleaned_data_path = BASE_DIR / "final_data.csv"
+        if cleaned_data_path.exists():
+            return load_diabetes_dataset(cleaned_data_path), cleaned_data_path.name
+        return None, None
+    except Exception as e:
+        log_error(f"Error in _load_cleaned_data: {e}", e)
+        return None, None
 
 
 # ---------- Streamlit UI ----------
@@ -447,8 +465,7 @@ except Exception as config_error:
 if not SHAP_AVAILABLE:
     st.warning("⚠️ SHAP not installed. Run: `pip install shap` for explainability features. App will work without SHAP explanations.")
 
-# App initialization success message (can be hidden after verification)
-st.success("✅ App initialized successfully")
+# App initialization - defer success message until after model loading attempt
 
 # Inject custom CSS theme
 st.markdown("""
@@ -673,10 +690,18 @@ try:
 except Exception as init_error:
     st.error(f"❌ Critical error during initialization: {str(init_error)}")
     import traceback
-    st.code(traceback.format_exc())
+    error_trace = traceback.format_exc()
+    st.code(error_trace)
+    log_error(f"Critical initialization error: {init_error}", init_error)
     model = None
     scaler = None
     FINAL_FEATURES = None
+
+# Show initialization success message after model loading attempt
+if model is not None and scaler is not None and FINAL_FEATURES is not None:
+    st.success("✅ App initialized successfully - Model loaded")
+else:
+    st.warning("⚠️ App initialized but model files not loaded. Some features will be unavailable.")
 
 # Navigation Bar
 st.markdown("""
@@ -921,8 +946,17 @@ with tab_dashboard:
 
     # Load raw data (diabetic_data.csv) for Dataset Snapshot
     # Use cached loading functions (defined at module level)
-    df_raw = load_raw_data_cached()
-    df, cleaned_data_name = load_cleaned_data_cached()
+    try:
+        df_raw = load_raw_data_cached()
+    except Exception as e:
+        log_error(f"Error loading raw data: {e}", e)
+        df_raw = None
+    
+    try:
+        df, cleaned_data_name = load_cleaned_data_cached()
+    except Exception as e:
+        log_error(f"Error loading cleaned data: {e}", e)
+        df, cleaned_data_name = None, None
     
     if df is None:
         data_file = st.file_uploader("Upload cleaned data CSV (final1_data.csv or final_data.csv)", type=["csv"])
