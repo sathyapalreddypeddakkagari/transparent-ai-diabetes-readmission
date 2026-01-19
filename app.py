@@ -22,7 +22,7 @@ MODEL_PATH = BASE_DIR / "xgb_model.pkl"
 SCALER_PATH = BASE_DIR / "scaler.pkl"
 FEATURES_PATH = BASE_DIR / "final_features.json"
 
-# Load model artifacts with error handling
+# Load model artifacts with error handling and caching
 @st.cache_resource
 def load_model_artifacts():
     """Load model artifacts with caching."""
@@ -40,12 +40,15 @@ def load_model_artifacts():
             final_features = json.load(f)
         return model, scaler, final_features
     except Exception as e:
-        st.error(f"❌ Error loading model artifacts: {str(e)}")
-        st.error(f"Current directory: {BASE_DIR}")
-        st.error(f"Looking for files in: {BASE_DIR}")
-        st.stop()
+        error_msg = f"❌ Error loading model artifacts: {str(e)}\n"
+        error_msg += f"Current directory: {BASE_DIR}\n"
+        error_msg += f"Looking for files in: {BASE_DIR}"
+        raise RuntimeError(error_msg) from e
 
-model, scaler, FINAL_FEATURES = load_model_artifacts()
+# Initialize model variables (will be loaded when needed)
+model = None
+scaler = None
+FINAL_FEATURES = None
 
 # Primary features for evaluation (from correlation analysis and feature importance)
 PRIMARY_FEATURES = [
@@ -579,6 +582,15 @@ st.set_page_config(
     layout="wide",
     initial_sidebar_state="expanded"
 )
+
+# Load model artifacts after Streamlit is initialized
+try:
+    model, scaler, FINAL_FEATURES = load_model_artifacts()
+except Exception as e:
+    st.error(f"❌ Error loading model artifacts: {str(e)}")
+    st.error(f"Current directory: {BASE_DIR}")
+    st.error(f"Please ensure all model files are in the repository.")
+    st.stop()
 
 # Navigation Bar
 st.markdown("""
