@@ -1,14 +1,27 @@
 import json
 import os
+import sys
 from pathlib import Path
 
-import joblib
-import numpy as np
-import pandas as pd
-import streamlit as st
-import matplotlib
-matplotlib.use('Agg')  # Use non-interactive backend for headless environments
-import matplotlib.pyplot as plt
+# Set up error logging to stderr before any Streamlit calls
+def log_error(message, exception=None):
+    """Log errors to stderr for debugging."""
+    print(f"ERROR: {message}", file=sys.stderr)
+    if exception:
+        import traceback
+        traceback.print_exc(file=sys.stderr)
+
+try:
+    import joblib
+    import numpy as np
+    import pandas as pd
+    import streamlit as st
+    import matplotlib
+    matplotlib.use('Agg')  # Use non-interactive backend for headless environments
+    import matplotlib.pyplot as plt
+except ImportError as import_err:
+    log_error(f"Failed to import required modules: {import_err}", import_err)
+    raise
 
 # Try to import SHAP, but handle gracefully if not available
 try:
@@ -416,11 +429,19 @@ def _load_cleaned_data():
 
 # ---------- Streamlit UI ----------
 # CRITICAL: st.set_page_config() MUST be called first, before any other Streamlit commands
-st.set_page_config(
-    page_title="Transparent AI Models for Early Identification of High-Risk Diabetes Readmissions",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
+try:
+    st.set_page_config(
+        page_title="Transparent AI Models for Early Identification of High-Risk Diabetes Readmissions",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+except Exception as config_error:
+    # If st.set_page_config() fails, we can't use st.error, so print to stderr
+    import sys
+    print(f"CRITICAL ERROR in st.set_page_config(): {config_error}", file=sys.stderr)
+    import traceback
+    traceback.print_exc()
+    raise
 
 # Show SHAP import warning if needed (after st.set_page_config)
 if not SHAP_AVAILABLE:
