@@ -14,7 +14,7 @@ try:
     SHAP_AVAILABLE = True
 except ImportError:
     SHAP_AVAILABLE = False
-    st.warning("⚠️ SHAP not installed. Run: `pip install shap` for explainability features.")
+    # Warning will be shown after st.set_page_config()
 
 # ---------- Load artifacts ----------
 BASE_DIR = Path(__file__).resolve().parent
@@ -394,6 +394,17 @@ def safe_value_counts(df, col, top_n=10):
 
 
 # ---------- Streamlit UI ----------
+# CRITICAL: st.set_page_config() MUST be called first, before any other Streamlit commands
+st.set_page_config(
+    page_title="Transparent AI Models for Early Identification of High-Risk Diabetes Readmissions",
+    layout="wide",
+    initial_sidebar_state="expanded"
+)
+
+# Show SHAP import warning if needed (after st.set_page_config)
+if not SHAP_AVAILABLE:
+    st.warning("⚠️ SHAP not installed. Run: `pip install shap` for explainability features. App will work without SHAP explanations.")
+
 # Inject custom CSS theme
 st.markdown("""
 <style>
@@ -576,12 +587,6 @@ h1, h2, h3 {
 }
 </style>
 """, unsafe_allow_html=True)
-
-st.set_page_config(
-    page_title="Transparent AI Models for Early Identification of High-Risk Diabetes Readmissions",
-    layout="wide",
-    initial_sidebar_state="expanded"
-)
 
 # Load model artifacts after Streamlit is initialized
 try:
