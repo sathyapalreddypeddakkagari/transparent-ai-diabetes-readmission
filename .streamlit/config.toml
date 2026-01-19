@@ -1,0 +1,21 @@
+[theme]
+# Primary color (matches --primary in CSS)
+primaryColor = "#5B8DD6"  # hsl(220 80% 50%)
+
+# Background color (matches --background in CSS)
+backgroundColor = "#F2F2F7"  # hsl(240 5% 95%)
+
+# Secondary background color
+secondaryBackgroundColor = "#E8E8F0"  # hsl(260 15% 90%)
+
+# Text color (matches --foreground in CSS)
+textColor = "#1A1A1A"  # hsl(240 5% 10%)
+
+# Font
+font = "sans serif"
+
+[server]
+headless = false
+
+[browser]
+gatherUsageStats = false
