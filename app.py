@@ -652,11 +652,9 @@ h1, h2, h3 {
 
 # Load model artifacts after Streamlit is initialized
 # Apply cache decorators now that Streamlit is initialized (AFTER st.set_page_config)
-try:
-    load_model_artifacts = st.cache_resource(_load_model_artifacts)
-except Exception as decorator_error:
-    st.error(f"❌ Error setting up model caching: {str(decorator_error)}")
-    load_model_artifacts = None
+@st.cache_resource
+def load_model_artifacts():
+    return _load_model_artifacts()
 
 try:
     load_raw_data_cached = st.cache_data(_load_raw_data)
@@ -666,42 +664,42 @@ except Exception as decorator_error:
     load_raw_data_cached = _load_raw_data  # Fallback without caching
     load_cleaned_data_cached = _load_cleaned_data  # Fallback without caching
 
-# Try to load models, but don't crash if they're missing
-try:
-    if load_model_artifacts is not None:
-        try:
-            model, scaler, FINAL_FEATURES = load_model_artifacts()
-        except Exception as e:
-            st.error(f"❌ Error loading model artifacts: {str(e)}")
-            st.error(f"Current directory: {BASE_DIR}")
-            st.error(f"Files checked:")
-            st.error(f"  - Model: {MODEL_PATH} (exists: {MODEL_PATH.exists()})")
-            st.error(f"  - Scaler: {SCALER_PATH} (exists: {SCALER_PATH.exists()})")
-            st.error(f"  - Features: {FEATURES_PATH} (exists: {FEATURES_PATH.exists()})")
-            st.error(f"Please ensure all model files are in the repository.")
-            # Don't stop - allow app to show error message
-            model = None
-            scaler = None
-            FINAL_FEATURES = None
-    else:
-        model = None
-        scaler = None
-        FINAL_FEATURES = None
-except Exception as init_error:
-    st.error(f"❌ Critical error during initialization: {str(init_error)}")
-    import traceback
-    error_trace = traceback.format_exc()
-    st.code(error_trace)
-    log_error(f"Critical initialization error: {init_error}", init_error)
-    model = None
-    scaler = None
-    FINAL_FEATURES = None
+def ensure_model_loaded():
+    global model, scaler, FINAL_FEATURES
+    if model is None or scaler is None or FINAL_FEATURES is None:
+        model, scaler, FINAL_FEATURES = load_model_artifacts()
 
-# Show initialization success message after model loading attempt
-if model is not None and scaler is not None and FINAL_FEATURES is not None:
-    st.success("✅ App initialized successfully - Model loaded")
-else:
-    st.warning("⚠️ App initialized but model files not loaded. Some features will be unavailable.")
+# # Try to load models, but don't crash if they're missing
+# try:
+#     if load_model_artifacts is not None:
+#         try:
+#             model, scaler, FINAL_FEATURES = load_model_artifacts()
+#         except Exception as e:
+#             st.error(f"❌ Error loading model artifacts: {str(e)}")
+#             st.error(f"Current directory: {BASE_DIR}")
+#             st.error(f"Files checked:")
+#             st.error(f"  - Model: {MODEL_PATH} (exists: {MODEL_PATH.exists()})")
+#             st.error(f"  - Scaler: {SCALER_PATH} (exists: {SCALER_PATH.exists()})")
+#             st.error(f"  - Features: {FEATURES_PATH} (exists: {FEATURES_PATH.exists()})")
+#             st.error(f"Please ensure all model files are in the repository.")
+#             # Don't stop - allow app to show error message
+#             model = None
+#             scaler = None
+#             FINAL_FEATURES = None
+#     else:
+#         model = None
+#         scaler = None
+#         FINAL_FEATURES = None
+# except Exception as init_error:
+#     st.error(f"❌ Critical error during initialization: {str(init_error)}")
+#     import traceback
+#     error_trace = traceback.format_exc()
+#     st.code(error_trace)
+#     log_error(f"Critical initialization error: {init_error}", init_error)
+#     model = None
+#     scaler = None
+#     FINAL_FEATURES = None
+
 
 # Navigation Bar
 st.markdown("""
@@ -810,11 +808,12 @@ with tab_infer:
     
     if patient is not None:
         # Check if model is loaded
-        if model is None or scaler is None or FINAL_FEATURES is None:
-            st.error("❌ **Model not loaded!** Please check that all model files are in the repository.")
+        try:
+            ensure_model_loaded()
+        except Exception as e:
+            st.error(f"❌ Could not load model artifacts: {e}")
             st.error("Required files: `xgb_model.pkl`, `scaler.pkl`, `final_features.json`")
             st.stop()
-        
         # Show ICD-9 Groupings
         st.markdown("---")
         st.markdown("### 📋 ICD-9 Diagnosis Groupings")
