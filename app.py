@@ -10,7 +10,16 @@ def log_error(message, exception=None):
     if exception:
         import traceback
         traceback.print_exc(file=sys.stderr)
+# Exception handler for uncaught errors
+def exception_handler(exc_type, exc_value, exc_traceback):
+    print("=" * 80, file=sys.stderr)
+    print("UNCAUGHT EXCEPTION:", file=sys.stderr)
+    print("=" * 80, file=sys.stderr)
+    import traceback
+    traceback.print_exception(exc_type, exc_value, exc_traceback, file=sys.stderr)
+    print("=" * 80, file=sys.stderr)
 
+sys.excepthook = exception_handler
 try:
     import joblib
     import numpy as np
@@ -23,40 +32,40 @@ except ImportError as import_err:
     log_error(f"Failed to import required modules: {import_err}", import_err)
     raise
 
-# Try to import SHAP, but handle gracefully if not available
+# Try to import SHAP, but handle gracefully if not available OR broken
 try:
     import shap
     SHAP_AVAILABLE = True
-except ImportError:
+except Exception as shap_err:
+    # On some managed platforms (e.g., Streamlit Cloud), SHAP can fail to import
+    # due to binary / version issues. We log the error and continue without SHAP
+    # so that the app backend can still start.
+    log_error(f"SHAP import failed; disabling SHAP features: {shap_err}", shap_err)
     SHAP_AVAILABLE = False
     # Warning will be shown after st.set_page_config()
+
+try:
+    st.set_page_config(
+        page_title="Transparent AI Models for Early Identification of High-Risk Diabetes Readmissions",
+        layout="wide",
+        initial_sidebar_state="expanded"
+    )
+except Exception as config_error:
+    print(f"CRITICAL ERROR in st.set_page_config(): {config_error}", file=sys.stderr)
+    import traceback
+    traceback.print_exc()
+    raise
+
+# Show SHAP warning after page config
+if not SHAP_AVAILABLE:
+    st.warning("⚠️ SHAP not installed. Run: `pip install shap` for explainability features.")
+
 
 # ---------- Load artifacts ----------
 BASE_DIR = Path(__file__).resolve().parent
 MODEL_PATH = BASE_DIR / "xgb_model.pkl"
 SCALER_PATH = BASE_DIR / "scaler.pkl"
 FEATURES_PATH = BASE_DIR / "final_features.json"
-
-# Load model artifacts with error handling and caching
-# Function will be decorated after Streamlit initialization
-def _load_model_artifacts():
-    """Load model artifacts (decorator applied after st.set_page_config)."""
-    try:
-        if not MODEL_PATH.exists():
-            raise FileNotFoundError(f"Model file not found: {MODEL_PATH}")
-        if not SCALER_PATH.exists():
-            raise FileNotFoundError(f"Scaler file not found: {SCALER_PATH}")
-        if not FEATURES_PATH.exists():
-            raise FileNotFoundError(f"Features file not found: {FEATURES_PATH}")
-        
-        model = joblib.load(MODEL_PATH)
-        scaler = joblib.load(SCALER_PATH)
-        with open(FEATURES_PATH, "r") as f:
-            final_features = json.load(f)
-        return model, scaler, final_features
-    except Exception as e:
-        error_msg = f"Error loading model artifacts: {str(e)}"
-        raise RuntimeError(error_msg) from e
 
 # Initialize model variables (will be loaded when needed)
 model = None
@@ -69,6 +78,111 @@ PRIMARY_FEATURES = [
     'service_utilization_log', 'numchange', 'encounter_count', 'meds_per_diag',
     'hospital_per_age', 'num_medications|time_in_hospital', 'num_medications|number_diagnoses'
 ]
+
+medication_cols = [
+    'metformin', 'repaglinide', 'glimepiride', 'glipizide', 'glyburide',
+    'pioglitazone', 'rosiglitazone', 'insulin'
+]
+
+# ---------- Demo patients (for quick testing) ----------
+patients = [
+    {
+        "age": 4, "time_in_hospital": 3, "num_lab_procedures": 25, "num_procedures": 0,
+        "num_medications": 5, "number_outpatient": 0, "number_emergency": 0,
+        "number_inpatient": 0, "number_diagnoses": 2, "encounter_count": 1,
+        "gender": 'Female', "change": 'No', "diabetesMed": 'No',
+        "max_glu_serum": "Norm", "A1Cresult": "Norm",
+        "medical_specialty": "Family/GeneralPractice",
+        "diag_1": "250.00", "diag_2": "401.9", "diag_3": "486",
+        "metformin": 0, "repaglinide": 0, "glimepiride": 0,
+        "glipizide": 0, "glyburide": 0, "pioglitazone": 0,
+        "rosiglitazone": 0, "insulin": 0
+    },
+    {
+        "age": 6, "time_in_hospital": 4, "num_lab_procedures": 30, "num_procedures": 1,
+        "num_medications": 6, "number_outpatient": 1, "number_emergency": 0,
+        "number_inpatient": 1, "number_diagnoses": 3, "encounter_count": 2,
+        "gender": 'Male', "change": 'No', "diabetesMed": 'Yes',
+        "max_glu_serum": "Norm", "A1Cresult": "Norm",
+        "medical_specialty": "InternalMedicine",
+        "diag_1": "250.00", "diag_2": "401.9", "diag_3": "486",
+        "metformin": 1, "repaglinide": 0, "glimepiride": 0,
+        "glipizide": 0, "glyburide": 0, "pioglitazone": 0,
+        "rosiglitazone": 0, "insulin": 0
+    },
+    {
+        "age": 8, "time_in_hospital": 9, "num_lab_procedures": 55, "num_procedures": 2,
+        "num_medications": 14, "number_outpatient": 2, "number_emergency": 2,
+        "number_inpatient": 4, "number_diagnoses": 6, "encounter_count": 7,
+        "gender": 'Male', "change": 'Ch', "diabetesMed": 'Yes',
+        "max_glu_serum": ">300", "A1Cresult": ">7",
+        "medical_specialty": "InternalMedicine",
+        "diag_1": "250.00", "diag_2": "401.9", "diag_3": "486",
+        "metformin": 0, "repaglinide": 0, "glimepiride": 0,
+        "glipizide": 1, "glyburide": 0, "pioglitazone": 0,
+        "rosiglitazone": 0, "insulin": 1
+    }
+]
+
+# Load model artifacts with error handling and caching
+# Function will be decorated after Streamlit initialization
+def _load_model_artifacts():
+    """Load model artifacts (decorator applied after st.set_page_config)."""
+    global MODEL_LOAD_ERROR
+    try:
+        if not MODEL_PATH.exists():
+            raise FileNotFoundError(f"Model file not found: {MODEL_PATH}")
+        if not SCALER_PATH.exists():
+            raise FileNotFoundError(f"Scaler file not found: {SCALER_PATH}")
+        if not FEATURES_PATH.exists():
+            raise FileNotFoundError(f"Features file not found: {FEATURES_PATH}")
+        
+        model = joblib.load(MODEL_PATH)
+        scaler = joblib.load(SCALER_PATH)
+        with open(FEATURES_PATH, "r") as f:
+            final_features = json.load(f)
+
+        MODEL_LOAD_ERROR = None
+        return model, scaler, final_features
+    except Exception as e:
+        error_msg = f"Error loading model artifacts: {str(e)}"
+        log_error(error_msg,e)
+        MODEL_LOAD_ERROR = error_msg
+        return None, None, None
+
+# Cache functions for data loading (functions defined, decorators applied after st.set_page_config)
+def _load_raw_data():
+    """Load raw diabetes dataset."""
+    try:
+        raw_data_path = BASE_DIR / "diabetic_data.csv"
+        if raw_data_path.exists():
+            return load_diabetes_dataset(raw_data_path)
+        return None
+    except Exception as e:
+        log_error(f"Error in _load_raw_data: {e}", e)
+        return None
+
+def _load_cleaned_data():
+    """Load cleaned diabetes dataset."""
+    try:
+        cleaned_data_path = BASE_DIR / "final_data.csv"
+        if not cleaned_data_path.exists():
+            cleaned_data_path = BASE_DIR / "final_data.csv"
+        if cleaned_data_path.exists():
+            return load_diabetes_dataset(cleaned_data_path), cleaned_data_path.name
+        return None, None
+    except Exception as e:
+        log_error(f"Error in _load_cleaned_data: {e}", e)
+        return None, None
+
+def ensure_model_loaded():
+    global model, scaler, FINAL_FEATURES
+    if model is None or scaler is None or FINAL_FEATURES is None:
+        model, scaler, FINAL_FEATURES = load_model_artifacts()
+        if model is None:
+            raise RuntimeError(MODEL_LOAD_ERROR or "Model artifacts could not be loaded." )
+
+
 
 # ---------- Helper functions ----------
 def group_icd9(code):
@@ -173,9 +287,20 @@ def get_icd9_diagnosis_name(code):
         prefix2 = code_str[:2]
         if prefix2 in icd9_map:
             return icd9_map[prefix2]
+
+    # Try to get category description
+    category = get_icd9_category(code_str)
+    if category:
+        return f'{category} (ICD-9: {code_str})'
     
-    # Get ICD-9 category description based on code ranges (ICD-9-CM structure)
-    def get_icd9_category(code_num):
+    # Return grouped category as final fallback
+    group = group_icd9(code_str)
+    if group != 'Other':
+        return f'{group} (ICD-9: {code_str})'
+    
+    return f'Other (ICD-9: {code_str})'
+# Get ICD-9 category description based on code ranges (ICD-9-CM structure)
+def get_icd9_category(code_num):
         """Get category description based on ICD-9-CM code ranges."""
         try:
             # Remove 'V' or 'E' prefix if present
@@ -186,9 +311,9 @@ def get_icd9_diagnosis_name(code):
                 return 'Supplementary Classification'
             elif code_num.startswith('E'):
                 return 'Supplementary Classification: External Causes of Injury'
-            
+
             num = int(code_num.split('.')[0]) if '.' in code_num else int(code_num[:3])
-            
+
             if 1 <= num <= 139:
                 return 'Infectious And Parasitic Diseases'
             elif 140 <= num <= 239:
@@ -226,19 +351,6 @@ def get_icd9_diagnosis_name(code):
         except (ValueError, AttributeError):
             pass
         return None
-    
-    # Try to get category description
-    category = get_icd9_category(code_str)
-    if category:
-        return f'{category} (ICD-9: {code_str})'
-    
-    # Return grouped category as final fallback
-    group = group_icd9(code_str)
-    if group != 'Other':
-        return f'{group} (ICD-9: {code_str})'
-    
-    return f'Other (ICD-9: {code_str})'
-
 
 def bin_specialty(spec):
     if spec in ['InternalMedicine', 'Cardiology', 'Family/GeneralPractice']:
@@ -246,50 +358,6 @@ def bin_specialty(spec):
     else:
         return 'Other'
 
-medication_cols = [
-    'metformin', 'repaglinide', 'glimepiride', 'glipizide', 'glyburide',
-    'pioglitazone', 'rosiglitazone', 'insulin'
-]
-
-# ---------- Demo patients (for quick testing) ----------
-patients = [
-    {
-        "age": 4, "time_in_hospital": 3, "num_lab_procedures": 25, "num_procedures": 0,
-        "num_medications": 5, "number_outpatient": 0, "number_emergency": 0,
-        "number_inpatient": 0, "number_diagnoses": 2, "encounter_count": 1,
-        "gender": 'Female', "change": 'No', "diabetesMed": 'No',
-        "max_glu_serum": "Norm", "A1Cresult": "Norm",
-        "medical_specialty": "Family/GeneralPractice",
-        "diag_1": "250.00", "diag_2": "401.9", "diag_3": "486",
-        "metformin": 0, "repaglinide": 0, "glimepiride": 0,
-        "glipizide": 0, "glyburide": 0, "pioglitazone": 0,
-        "rosiglitazone": 0, "insulin": 0
-    },
-    {
-        "age": 6, "time_in_hospital": 4, "num_lab_procedures": 30, "num_procedures": 1,
-        "num_medications": 6, "number_outpatient": 1, "number_emergency": 0,
-        "number_inpatient": 1, "number_diagnoses": 3, "encounter_count": 2,
-        "gender": 'Male', "change": 'No', "diabetesMed": 'Yes',
-        "max_glu_serum": "Norm", "A1Cresult": "Norm",
-        "medical_specialty": "InternalMedicine",
-        "diag_1": "250.00", "diag_2": "401.9", "diag_3": "486",
-        "metformin": 1, "repaglinide": 0, "glimepiride": 0,
-        "glipizide": 0, "glyburide": 0, "pioglitazone": 0,
-        "rosiglitazone": 0, "insulin": 0
-    },
-    {
-        "age": 8, "time_in_hospital": 9, "num_lab_procedures": 55, "num_procedures": 2,
-        "num_medications": 14, "number_outpatient": 2, "number_emergency": 2,
-        "number_inpatient": 4, "number_diagnoses": 6, "encounter_count": 7,
-        "gender": 'Male', "change": 'Ch', "diabetesMed": 'Yes',
-        "max_glu_serum": ">300", "A1Cresult": ">7",
-        "medical_specialty": "InternalMedicine",
-        "diag_1": "250.00", "diag_2": "401.9", "diag_3": "486",
-        "metformin": 0, "repaglinide": 0, "glimepiride": 0,
-        "glipizide": 1, "glyburide": 0, "pioglitazone": 0,
-        "rosiglitazone": 0, "insulin": 1
-    }
-]
 
 
 def preprocess_single_patient(patient_dict):
@@ -419,51 +487,9 @@ def safe_value_counts(df, col, top_n=10):
         return df[col].value_counts().head(top_n)
     return pd.Series(dtype="int64")
 
-# Cache functions for data loading (functions defined, decorators applied after st.set_page_config)
-def _load_raw_data():
-    """Load raw diabetes dataset."""
-    try:
-        raw_data_path = BASE_DIR / "diabetic_data.csv"
-        if raw_data_path.exists():
-            return load_diabetes_dataset(raw_data_path)
-        return None
-    except Exception as e:
-        log_error(f"Error in _load_raw_data: {e}", e)
-        return None
-
-def _load_cleaned_data():
-    """Load cleaned diabetes dataset."""
-    try:
-        cleaned_data_path = BASE_DIR / "final1_data.csv"
-        if not cleaned_data_path.exists():
-            cleaned_data_path = BASE_DIR / "final_data.csv"
-        if cleaned_data_path.exists():
-            return load_diabetes_dataset(cleaned_data_path), cleaned_data_path.name
-        return None, None
-    except Exception as e:
-        log_error(f"Error in _load_cleaned_data: {e}", e)
-        return None, None
 
 
-# ---------- Streamlit UI ----------
-# CRITICAL: st.set_page_config() MUST be called first, before any other Streamlit commands
-try:
-    st.set_page_config(
-        page_title="Transparent AI Models for Early Identification of High-Risk Diabetes Readmissions",
-        layout="wide",
-        initial_sidebar_state="expanded"
-    )
-except Exception as config_error:
-    # If st.set_page_config() fails, we can't use st.error, so print to stderr
-    import sys
-    print(f"CRITICAL ERROR in st.set_page_config(): {config_error}", file=sys.stderr)
-    import traceback
-    traceback.print_exc()
-    raise
 
-# Show SHAP import warning if needed (after st.set_page_config)
-if not SHAP_AVAILABLE:
-    st.warning("⚠️ SHAP not installed. Run: `pip install shap` for explainability features. App will work without SHAP explanations.")
 
 # App initialization - defer success message until after model loading attempt
 
@@ -664,10 +690,6 @@ except Exception as decorator_error:
     load_raw_data_cached = _load_raw_data  # Fallback without caching
     load_cleaned_data_cached = _load_cleaned_data  # Fallback without caching
 
-def ensure_model_loaded():
-    global model, scaler, FINAL_FEATURES
-    if model is None or scaler is None or FINAL_FEATURES is None:
-        model, scaler, FINAL_FEATURES = load_model_artifacts()
 
 # # Try to load models, but don't crash if they're missing
 # try:
